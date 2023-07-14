@@ -1,9 +1,7 @@
 package by.andronovich.bot.BlazeCampBot.service;
 
 import by.andronovich.bot.BlazeCampBot.config.BotConfig;
-import by.andronovich.bot.BlazeCampBot.model.QuestionRepository;
-import by.andronovich.bot.BlazeCampBot.model.User;
-import by.andronovich.bot.BlazeCampBot.model.UserRepository;
+import by.andronovich.bot.BlazeCampBot.model.*;
 import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,13 +14,13 @@ import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 @Slf4j
 @Component
@@ -30,29 +28,29 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     BotConfig botConfig;
 
-    @Autowired
-    private UserRepository userRepository;
-    private QuestionRepository questionRepository;
+    private final UserRepository userRepository;
+    private final QuestionRepository questionRepository;
+    private final ScheduleRepository scheduleRepository;
+    private final Button button;
+    private final Admin admin;
 
-    private static final String INSTAGRAM_ANDREI_BUTTON = "https://www.instagram.com/andrei_andronovich/";
-    private static final String INSTAGRAM_CHURCH_YOUTH_BUTTON = "https://www.instagram.com/janov_youth/";
+    public static final String INSTAGRAM_ANDREI_BUTTON = "https://www.instagram.com/andrei_andronovich/";
+    public static final String INSTAGRAM_CHURCH_YOUTH_BUTTON = "https://www.instagram.com/janov_youth/";
     public final static String Question_To_The_Pastor = "Вопрос пастору";
     public final static String SCHEDULE = "\uD83D\uDCC5 Расписание";
     public final static String WORKSHOP = "Семинары";
     public final static String BACK_BUTTON = "Отмена";
-    //TODO возможно тут нужно записать в отдельную константу полное расписание.
-    // Пока не знаю как это сделать правильно
-    public final static String MONDAY_BUTTON = "Mon";
-    public final static String TUESDAY_BUTTON = "Tue";
-    public final static String WEDNESDAY_BUTTON = "Wed";
-    public final static String THURSDAY_BUTTON = "Thu";
-    public final static String FRIDAY_BUTTON = "Fri";
     public final static String SOCIAL_MEDIA = "Наши социальные сети";
 
-
-    public TelegramBot(@Value("${bot.token}") String botToken, BotConfig botConfig) {
+    public TelegramBot(@Value("${bot.token}") String botToken, BotConfig botConfig, UserRepository userRepository, QuestionRepository questionRepository, ScheduleRepository scheduleRepository, Button button, Admin admin) {
         super(botToken);
         this.botConfig = botConfig;
+
+        this.userRepository = userRepository;
+        this.questionRepository = questionRepository;
+        this.scheduleRepository = scheduleRepository;
+        this.button = button;
+        this.admin = admin;
     }
 
     @Override
@@ -62,96 +60,115 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
-        if ( (update.hasMessage() || update.hasCallbackQuery()) && (update.getMessage().getChatId() == 182370306L ||
-                update.getCallbackQuery().getMessage().getChatId() == 182370306L)) {
-            if (update.hasMessage() && update.getMessage().hasText()) {
-                String messageText = update.getMessage().getText();
-                var chatId = update.getMessage().getChatId();
-                switch (messageText) {
-                    case "/start" -> {
-                        registerUser(update.getMessage());
-                        startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
-                    }
-                    case SCHEDULE -> {
-                        log.info("нажата кнопка расписания");
-                        schedualCommandReceived(chatId);
-                    }
-                    case SOCIAL_MEDIA -> {
-                        log.info("нажата кнопка социальных");
-                        socialMediaCommandReceived(chatId);
-                    }
-                    case Question_To_The_Pastor -> {
-                        log.info("нажата кнопка вопрос пастору ");
-                        // TODO Доделать полное описание вопроса пастору и реализацию отправки вопроса
-                        sendMessageToThePastor(chatId);
-                    }
-                    default -> {
-                        log.info("нажата кнопка  семинаров или неизвестной команды ");
-                        sendMessage(chatId, "Sorry, command was not recognized", mainMarkup());
+        if (update.hasMessage() && update.getMessage().hasText() && userRepository.findById(update.getMessage().getChatId()).get().getRole().contains("admin")) {
+            String messageText = update.getMessage().getText();
+            var chatId = update.getMessage().getChatId();
+            switch (messageText) {
+                case "/start" -> {
+                    registerUser(update.getMessage());
+                    startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
+                }
+                case SCHEDULE -> {
+                    log.info(update.getMessage().getChat().getFirstName() + update.getMessage().getChat().getFirstName() + ": нажата кнопка расписания");
+                    scheduleCommandReceived(chatId);
+                }
+                case WORKSHOP -> {
+                    log.info(update.getMessage().getChat().getFirstName() + update.getMessage().getChat().getFirstName() + ": нажата кнопка семинаров");
+                    workshopCommandReceived(chatId);
+                }
+                case SOCIAL_MEDIA -> {
+                    log.info(update.getMessage().getChat().getFirstName() + update.getMessage().getChat().getFirstName() + ": нажата кнопку социальных");
+                    socialMediaCommandReceived(chatId);
+                }
+                case Question_To_The_Pastor -> {
+                    log.info(update.getMessage().getChat().getFirstName() + update.getMessage().getChat().getFirstName() + ": нажата кнопка вопрос пастору ");
+                    // TODO Доделать полное описание вопроса пастору и реализацию отправки вопроса
+                    questionToThePastorCommandReceived(chatId, update);
+                }
+                case "Edit" -> {
+                    if (userRepository.findById(chatId).get().getRole().contains("admin")) {
+                        sendMessage(chatId, "Что вы хотите изменить?", editMainMarkup(chatId));
+                    } else {
+                        sendMessage(chatId, "Sorry, command was not recognized", mainMarkup(chatId));
                     }
                 }
-            } else if (update.hasCallbackQuery()) {
-                long chatId = update.getCallbackQuery().getMessage().getChatId();
-                String callbackData = update.getCallbackQuery().getData();
-                switch (callbackData) {
-                    case BACK_BUTTON -> {
-                        DeleteMessage message = new DeleteMessage();
-                        message.setChatId(chatId);
-                        message.setMessageId(update.getCallbackQuery().getMessage().getMessageId());
-                        try {
-                            execute(message);
-                        } catch (TelegramApiException e) {
-                            log.error("Error callBackData Back_Button: " + e.getMessage());
-                            throw new RuntimeException(e);
-                        }
+
+                case "editSCHEDULE" -> editScheduleCommandReceived(chatId);
+
+
+                default -> {
+                    log.info("нажата кнопка неизвестной команды ");
+                    sendMessage(chatId, "Sorry, command was not recognized", mainMarkup(chatId));
+                }
+            }
+        } else if (update.hasCallbackQuery() && update.getCallbackQuery().getMessage().getChatId() == 182370306L) {
+            long chatId = update.getCallbackQuery().getMessage().getChatId();
+            log.info(" получение chatId from CallBack: " + update.getCallbackQuery().getMessage().getChatId());
+            String callbackData = update.getCallbackQuery().getData();
+            switch (callbackData) {
+                case BACK_BUTTON -> {
+                    DeleteMessage message = new DeleteMessage();
+                    message.setChatId(chatId);
+                    message.setMessageId(update.getCallbackQuery().getMessage().getMessageId());
+                    try {
+                        execute(message);
+                    } catch (TelegramApiException e) {
+                        log.error("Error callBackData.Back_Button: " + e.getMessage());
+                        throw new RuntimeException(e);
                     }
-                    //case MONDAY_BUTTON ->
+                }
+                case "Mon" -> {
+                    String description = scheduleRepository.findById("Mon").get().getFullScheduleDescription();
+                    sendMessage(chatId, description, mainMarkup(chatId));
+                }
+                case "Tue" -> {
+                    String description = scheduleRepository.findById("Tue").get().getFullScheduleDescription();
+                    sendMessage(chatId, description, mainMarkup(chatId));
+                }
+                case "Wed" -> {
+                    String description = scheduleRepository.findById("Wed").get().getFullScheduleDescription();
+                    sendMessage(chatId, description, mainMarkup(chatId));
+                }
+                case "Thu" -> {
+                    String description = scheduleRepository.findById("Thu").get().getFullScheduleDescription();
+                    sendMessage(chatId, description, mainMarkup(chatId));
+                }
+                case "Fri" -> {
+                    String description = scheduleRepository.findById("Fri").get().getFullScheduleDescription();
+                    sendMessage(chatId, description, mainMarkup(chatId));
+                }
+                // todo так нужно написать для каждого дня недели
+                case "editMon" -> {
+                    Schedule schedule = new Schedule();
+                    schedule.setDay("Mon");
+                    schedule.setFullScheduleDescription("mdmvmdmvldmvmdmvmdmlvml");
+                    scheduleRepository.save(schedule);
+                    sendMessage(chatId, "расписание изменено", mainMarkup(chatId));
 
                 }
+
 
             }
+
         }
     }
 
-    private void schedualCommandReceived(Long chatId) {
+    private void workshopCommandReceived(Long chatId) {
+        String text = "Семинар на сегодня";
+        sendMessage(chatId, text, mainMarkup(chatId));
+    }
+
+
+    private void scheduleCommandReceived(Long chatId) {
         String text = "Выберите день :";
-        sendMessageAndButton(chatId, text, schedualDaysButton());
+        sendMessageAndButton(chatId, text, button.scheduleDaysButton());
     }
 
-    private InlineKeyboardMarkup schedualDaysButton() {
-        InlineKeyboardMarkup inlineMarkup = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
-        List<InlineKeyboardButton> rowInline = new ArrayList<>();
-        var button = new InlineKeyboardButton();
-//TODO сделать кнопки красиво. А то они все  в одну линию идут
-        button.setText(MONDAY_BUTTON);
-        button.setCallbackData(MONDAY_BUTTON);
-        rowInline.add(button);
-
-        button = new InlineKeyboardButton();
-        button.setText(TUESDAY_BUTTON);
-        button.setCallbackData(THURSDAY_BUTTON);
-        rowInline.add(button);
-
-        button = new InlineKeyboardButton();
-        button.setText(WEDNESDAY_BUTTON);
-        button.setCallbackData(WEDNESDAY_BUTTON);
-        rowInline.add(button);
-
-        button = new InlineKeyboardButton();
-        button.setText(THURSDAY_BUTTON);
-        button.setCallbackData(THURSDAY_BUTTON);
-        rowInline.add(button);
-
-        button = new InlineKeyboardButton();
-        button.setText(FRIDAY_BUTTON);
-        button.setCallbackData(FRIDAY_BUTTON);
-        rowInline.add(button);
-
-        rowsInline.add(rowInline);
-        inlineMarkup.setKeyboard(rowsInline);
-        return inlineMarkup;
+    private void editScheduleCommandReceived(Long chatId) {
+        String text = "Выберите день который хотите изменить :";
+        sendMessageAndButton(chatId, text, button.editScheduleDaysButton());
     }
+
 
     private void registerUser(Message message) {
         if (userRepository.findById(message.getChatId()).isEmpty()) {
@@ -163,13 +180,14 @@ public class TelegramBot extends TelegramLongPollingBot {
             user.setLastName(chat.getLastName());
             user.setUserName(chat.getUserName());
             user.setRegisteredAt(new Timestamp(System.currentTimeMillis()));
+            user.setRole("user");
             userRepository.save(user);
             log.info("user saved: " + user);
         }
     }
 
 
-    private void sendMessage(long chatId, String textToSend, ReplyKeyboardMarkup markup) {
+    public void sendMessage(long chatId, String textToSend, ReplyKeyboardMarkup markup) {
         SendMessage message = new SendMessage();
         message.setChatId(chatId);
         message.setText(textToSend);
@@ -184,35 +202,20 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private void startCommandReceived(Long chatId, String firstName) {
         String answer = EmojiParser.parseToUnicode(" Hi, " + firstName + ", Nice to meet you " + ":grinning:");
-        sendMessage(chatId, answer, mainMarkup());
+        sendMessage(chatId, answer, mainMarkup(chatId));
 
     }
 
     private void socialMediaCommandReceived(long chatId) {
-        String text = "*Сообщение о том что это наши соц сети и ещё картинку было бы неплохо. " +
-                "А снизу нужно добавить кнопочки-ссылки на соцсети";
-        sendMessageAndButton(chatId, text, socialMediaButton());
-    }
-
-    public ReplyKeyboardMarkup mainMarkup() {
-        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
-        List<KeyboardRow> keyboardRows = new ArrayList<>();
-        KeyboardRow row = new KeyboardRow();
-        row.add(SCHEDULE);
-        row.add(WORKSHOP);
-        keyboardRows.add(row);
-        row = new KeyboardRow();
-        row.add(SOCIAL_MEDIA);
-        row.add(Question_To_The_Pastor);
-        keyboardRows.add(row);
-        keyboardMarkup.setKeyboard(keyboardRows);
-        return keyboardMarkup;
+        String text = "*Сообщение о том что это наши соц сети и ещё картинку было бы неплохо. " + "А снизу нужно добавить кнопочки-ссылки на соцсети";
+        sendMessageAndButton(chatId, text, button.socialMediaButton());
     }
 
     //TODO отправить сообщение пастору
-    public void sendMessageToThePastor(long chatId) {
-        String text = "Вы можете написать анонимный вопрос пастору в поле ввода сообщения и нажать отправить. Или нажмите отмена ";
-        sendMessageAndButton(chatId, text, backButton());
+
+    public void questionToThePastorCommandReceived(long chatId, Update update) {
+        String text = "Вы можете написать анонимный вопрос пастору в поле ввода сообщения и нажать отправить. Или нажмите отмена " + " Id сообщения " + update.getMessage().getMessageId();
+        sendMessageAndButton(chatId, text, button.backButton());
     }
 
     public void sendMessageAndButton(long chatId, String textToSend, InlineKeyboardMarkup inlineMarkup) {
@@ -227,40 +230,42 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
-    public InlineKeyboardMarkup backButton() {
-        InlineKeyboardMarkup inlineMarkup = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
-        List<InlineKeyboardButton> rowInline = new ArrayList<>();
-        var backButton = new InlineKeyboardButton();
-        backButton.setText(BACK_BUTTON);
-        backButton.setCallbackData(BACK_BUTTON);
-        rowInline.add(backButton);
-        rowsInline.add(rowInline);
-        inlineMarkup.setKeyboard(rowsInline);
-        return inlineMarkup;
+
+    public ReplyKeyboardMarkup mainMarkup(long chatId) {
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        List<KeyboardRow> keyboardRows = new ArrayList<>();
+        KeyboardRow row = new KeyboardRow();
+        row.add(SCHEDULE);
+        row.add(WORKSHOP);
+        keyboardRows.add(row);
+        row = new KeyboardRow();
+        row.add(SOCIAL_MEDIA);
+        row.add(Question_To_The_Pastor);
+        // todo проверять на наличие в массиве. То есть добавить ещё админов
+        if (userRepository.findById(chatId).get().getChatId() == 182370306L) {
+            row.add("Edit");
+        }
+        //todo тут нужно написать айди василия. Пока что стоит мой
+        if (userRepository.findById(chatId).get().getChatId() == 182370306L) {
+            row.add("Questions");
+        }
+        keyboardRows.add(row);
+        keyboardMarkup.setKeyboard(keyboardRows);
+        return keyboardMarkup;
     }
 
-    public InlineKeyboardMarkup socialMediaButton() {
-        InlineKeyboardMarkup inlineMarkup = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
 
-        List<InlineKeyboardButton> rowInline = new ArrayList<>();
-        var instagramButton = new InlineKeyboardButton();
-        instagramButton.setText("Instagram приятного человека");
-        instagramButton.setUrl(INSTAGRAM_ANDREI_BUTTON);
-        rowInline.add(instagramButton);
-        rowsInline.add(rowInline);
-
-        rowInline = new ArrayList<>();
-        var instagramChurchButton = new InlineKeyboardButton();
-        instagramChurchButton.setText("Instagram молодёжи");
-        instagramChurchButton.setUrl(INSTAGRAM_CHURCH_YOUTH_BUTTON);
-        rowInline.add(instagramChurchButton);
-        rowsInline.add(rowInline);
-
-        inlineMarkup.setKeyboard(rowsInline);
-        return inlineMarkup;
-
-
+    public ReplyKeyboardMarkup editMainMarkup(long chatId) {
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        List<KeyboardRow> keyboardRows = new ArrayList<>();
+        KeyboardRow row = new KeyboardRow();
+        row.add("editSCHEDULE");
+        row.add("editWORKSHOP");
+        keyboardRows.add(row);
+        row = new KeyboardRow();
+        row.add("editSOCIAL_MEDIA");
+        keyboardRows.add(row);
+        keyboardMarkup.setKeyboard(keyboardRows);
+        return keyboardMarkup;
     }
 }

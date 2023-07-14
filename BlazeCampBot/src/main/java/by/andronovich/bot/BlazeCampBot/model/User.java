@@ -19,6 +19,16 @@ public class User {
 
     private Timestamp registeredAt;
 
+    private String role;
+
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
+    }
+
     @OneToMany(mappedBy = "owner")
     private List<Question> question;
 
