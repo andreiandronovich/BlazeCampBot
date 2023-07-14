@@ -1,6 +1,7 @@
 package by.andronovich.bot.BlazeCampBot.service;
 
 import by.andronovich.bot.BlazeCampBot.config.BotConfig;
+import by.andronovich.bot.BlazeCampBot.model.QuestionRepository;
 import by.andronovich.bot.BlazeCampBot.model.User;
 import by.andronovich.bot.BlazeCampBot.model.UserRepository;
 import com.vdurmont.emoji.EmojiParser;
@@ -31,6 +32,7 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Autowired
     private UserRepository userRepository;
+    private QuestionRepository questionRepository;
 
     private static final String INSTAGRAM_ANDREI_BUTTON = "https://www.instagram.com/andrei_andronovich/";
     private static final String INSTAGRAM_CHURCH_YOUTH_BUTTON = "https://www.instagram.com/janov_youth/";
@@ -38,11 +40,13 @@ public class TelegramBot extends TelegramLongPollingBot {
     public final static String SCHEDULE = "\uD83D\uDCC5 Расписание";
     public final static String WORKSHOP = "Семинары";
     public final static String BACK_BUTTON = "Отмена";
-    public final static String MONDAY_BUTTON = "Понедельник";
-    public final static String TUESDAY_BUTTON = "Вторник";
-    public final static String WEDNESDAY_BUTTON = "Среда";
-    public final static String THURSDAY_BUTTON = "Четверг";
-    public final static String FRIDAY_BUTTON = "Пятница";
+    //TODO возможно тут нужно записать в отдельную константу полное расписание.
+    // Пока не знаю как это сделать правильно
+    public final static String MONDAY_BUTTON = "Mon";
+    public final static String TUESDAY_BUTTON = "Tue";
+    public final static String WEDNESDAY_BUTTON = "Wed";
+    public final static String THURSDAY_BUTTON = "Thu";
+    public final static String FRIDAY_BUTTON = "Fri";
     public final static String SOCIAL_MEDIA = "Наши социальные сети";
 
 
@@ -58,35 +62,51 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
-        if (update.hasMessage() && update.getMessage().hasText()) {
-            String messageText = update.getMessage().getText();
-            var chatId = update.getMessage().getChatId();
-            switch (messageText) {
-                case "/start" -> {
-                    registerUser(update.getMessage());
-                    startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
-                }
-                case SCHEDULE -> schedualCommandReceived(chatId);
-                case SOCIAL_MEDIA -> socialMediaCommandReceived(chatId);
-                case Question_To_The_Pastor ->
-                    // TODO Доделать полное описание вопроса пастору и реализацию отправки вопроса
-                        sendMessageToThePastor(chatId);
-                default -> sendMessage(chatId, "Sorry, command was not recognized", mainMarkup());
-            }
-        } else if (update.hasCallbackQuery()) {
-            long chatId = update.getCallbackQuery().getMessage().getChatId();
-            String callbackData = update.getCallbackQuery().getData();
-            switch (callbackData) {
-                case BACK_BUTTON -> {
-                    DeleteMessage message = new DeleteMessage();
-                    message.setChatId(chatId);
-                    message.setMessageId(update.getCallbackQuery().getMessage().getMessageId());
-                    try {
-                        execute(message);
-                    } catch (TelegramApiException e) {
-                        log.error("Error callBackData Back_Button: " + e.getMessage());
-                        throw new RuntimeException(e);
+        if ( (update.hasMessage() || update.hasCallbackQuery()) && (update.getMessage().getChatId() == 182370306L ||
+                update.getCallbackQuery().getMessage().getChatId() == 182370306L)) {
+            if (update.hasMessage() && update.getMessage().hasText()) {
+                String messageText = update.getMessage().getText();
+                var chatId = update.getMessage().getChatId();
+                switch (messageText) {
+                    case "/start" -> {
+                        registerUser(update.getMessage());
+                        startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
                     }
+                    case SCHEDULE -> {
+                        log.info("нажата кнопка расписания");
+                        schedualCommandReceived(chatId);
+                    }
+                    case SOCIAL_MEDIA -> {
+                        log.info("нажата кнопка социальных");
+                        socialMediaCommandReceived(chatId);
+                    }
+                    case Question_To_The_Pastor -> {
+                        log.info("нажата кнопка вопрос пастору ");
+                        // TODO Доделать полное описание вопроса пастору и реализацию отправки вопроса
+                        sendMessageToThePastor(chatId);
+                    }
+                    default -> {
+                        log.info("нажата кнопка  семинаров или неизвестной команды ");
+                        sendMessage(chatId, "Sorry, command was not recognized", mainMarkup());
+                    }
+                }
+            } else if (update.hasCallbackQuery()) {
+                long chatId = update.getCallbackQuery().getMessage().getChatId();
+                String callbackData = update.getCallbackQuery().getData();
+                switch (callbackData) {
+                    case BACK_BUTTON -> {
+                        DeleteMessage message = new DeleteMessage();
+                        message.setChatId(chatId);
+                        message.setMessageId(update.getCallbackQuery().getMessage().getMessageId());
+                        try {
+                            execute(message);
+                        } catch (TelegramApiException e) {
+                            log.error("Error callBackData Back_Button: " + e.getMessage());
+                            throw new RuntimeException(e);
+                        }
+                    }
+                    //case MONDAY_BUTTON ->
+
                 }
 
             }
@@ -240,5 +260,7 @@ public class TelegramBot extends TelegramLongPollingBot {
 
         inlineMarkup.setKeyboard(rowsInline);
         return inlineMarkup;
+
+
     }
 }
